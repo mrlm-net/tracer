@@ -4,12 +4,16 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
 	eventpkg "github.com/mrlm-net/tracer/pkg/event"
 	httppkg "github.com/mrlm-net/tracer/pkg/http"
+	tcpkg "github.com/mrlm-net/tracer/pkg/tcp"
+	udppkg "github.com/mrlm-net/tracer/pkg/udp"
 )
 
 var tracerFlag = flag.String("tracer", "http", "Type of tracer to use: udp, tcp, http, noop")
@@ -38,9 +42,79 @@ func main() {
 
 	switch *tracerFlag {
 	case "udp":
-		fmt.Fprintln(os.Stderr, "udp tracer not implemented yet")
+		// ensure target is host:port for UDP
+		addr := targetURL
+		if strings.Contains(targetURL, "://") {
+			u, err := url.Parse(targetURL)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "invalid target %q: %v\n", targetURL, err)
+				os.Exit(1)
+			}
+			host := u.Hostname()
+			port := u.Port()
+			if port == "" {
+				switch u.Scheme {
+				case "http":
+					port = "80"
+				case "https":
+					port = "443"
+				default:
+					fmt.Fprintf(os.Stderr, "no port in target %q and unknown scheme %q\n", targetURL, u.Scheme)
+					os.Exit(1)
+				}
+			}
+			addr = net.JoinHostPort(host, port)
+		} else if !strings.Contains(targetURL, ":") {
+			fmt.Fprintf(os.Stderr, "udp tracer target must be host:port or a URL with scheme\n")
+			os.Exit(1)
+		}
+
+		emitter := eventpkg.NewStdoutEmitter(os.Stdout, true, true)
+		opts := []udppkg.Option{udppkg.WithEmitter(emitter), udppkg.WithDryRun(*dryRun)}
+		if *dataFlag != "" {
+			opts = append(opts, udppkg.WithDataString(*dataFlag))
+		}
+		if err := udppkg.TraceAddr(context.Background(), addr, opts...); err != nil {
+			fmt.Fprintf(os.Stderr, "udp tracer failed: %v\n", err)
+			os.Exit(1)
+		}
 	case "tcp":
-		fmt.Fprintln(os.Stderr, "tcp tracer not implemented yet")
+		// ensure target is host:port for TCP
+		addr := targetURL
+		if strings.Contains(targetURL, "://") {
+			u, err := url.Parse(targetURL)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "invalid target %q: %v\n", targetURL, err)
+				os.Exit(1)
+			}
+			host := u.Hostname()
+			port := u.Port()
+			if port == "" {
+				switch u.Scheme {
+				case "http":
+					port = "80"
+				case "https":
+					port = "443"
+				default:
+					fmt.Fprintf(os.Stderr, "no port in target %q and unknown scheme %q\n", targetURL, u.Scheme)
+					os.Exit(1)
+				}
+			}
+			addr = net.JoinHostPort(host, port)
+		} else if !strings.Contains(targetURL, ":") {
+			fmt.Fprintf(os.Stderr, "tcp tracer target must be host:port or a URL with scheme\n")
+			os.Exit(1)
+		}
+
+		emitter := eventpkg.NewStdoutEmitter(os.Stdout, true, true)
+		opts := []tcpkg.Option{tcpkg.WithEmitter(emitter), tcpkg.WithDryRun(*dryRun)}
+		if *dataFlag != "" {
+			opts = append(opts, tcpkg.WithDataString(*dataFlag))
+		}
+		if err := tcpkg.TraceAddr(context.Background(), addr, opts...); err != nil {
+			fmt.Fprintf(os.Stderr, "tcp tracer failed: %v\n", err)
+			os.Exit(1)
+		}
 	case "http":
 		emitter := eventpkg.NewStdoutEmitter(os.Stdout, true, true)
 		opts := []httppkg.Option{httppkg.WithEmitter(emitter), httppkg.WithDryRun(*dryRun), httppkg.WithInjectTraceHeader(*injectTraceHeader)}
