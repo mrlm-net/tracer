@@ -199,19 +199,37 @@
 
 						// details panel (hidden, toggle via link)
 						const detailsPanel = el('div','col-span-3 mt-2 hidden')
-						// include headers table if present
+						// include headers list if present (render as definition list using template style)
 						if(e.payload && e.payload.headers){
 							detailsPanel.appendChild(el('div','text-xs text-gray-600 mb-1','Headers'))
-							const htbl = document.createElement('table')
-							htbl.className = 'min-w-full text-sm mb-2'
-							const htBody = document.createElement('tbody')
+							// wrapper and definition list
+							const wrapper = document.createElement('div')
+							wrapper.className = 'mt-2 border-t border-gray-100 dark:border-white/10'
+							const dl = document.createElement('dl')
+							dl.className = 'divide-y divide-gray-100 dark:divide-white/10'
+
+							// render each header as a dt/dd pair following the Applicant Information template
 							for(const k of Object.keys(e.payload.headers)){
-								const tr = document.createElement('tr')
-								tr.innerHTML = `<td class=\"px-2 py-1 align-top text-xs text-gray-600\">${k}</td><td class=\"px-2 py-1\">${e.payload.headers[k]}</td>`
-								htBody.appendChild(tr)
+								const row = document.createElement('div')
+								row.className = 'px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-0'
+
+								const dt = document.createElement('dt')
+								dt.className = 'text-sm/6 font-medium text-gray-900 dark:text-gray-100'
+								dt.textContent = k
+
+								const dd = document.createElement('dd')
+								dd.className = 'mt-1 text-sm/6 text-gray-700 sm:col-span-2 sm:mt-0 dark:text-gray-400'
+								// ensure header values are rendered as text
+								const val = e.payload.headers[k]
+								dd.textContent = (val === undefined || val === null) ? '' : String(val)
+
+								row.appendChild(dt)
+								row.appendChild(dd)
+								dl.appendChild(row)
 							}
-							htbl.appendChild(htBody)
-							detailsPanel.appendChild(htbl)
+
+							wrapper.appendChild(dl)
+							detailsPanel.appendChild(wrapper)
 						}
 						// raw payload / tags
 						if(e.tags && Object.keys(e.tags).length>0){
