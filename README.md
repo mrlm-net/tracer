@@ -76,10 +76,19 @@ Important flags (see `cmd/console/main.go`):
 
 - `-prefer-ip` : IP preference when resolving hostnames. Accepts `v4`, `v6`, or `auto` (default). When an IP literal is provided (e.g. `127.0.0.1` or `[::1]`) the tracer will honor the literal family.
 
+- `-o` / `-output` : `json` (default) or `html`. When set to `html` the CLI collects all events and writes a single HTML report instead of streaming NDJSON to stdout.
+- `--out-file` : Path to write the HTML report when `-o html` is selected (default `./tracer-report.html`).
+
 Example:
 
 ```bash
 go run ./cmd/console -tracer http -data '{"ping":1}' -method POST https://example.com/api
+```
+
+Example: generate HTML report
+
+```bash
+go run ./cmd/console -o html --out-file ./report.html -tracer http https://example.com/
 ```
 
 ## Packages / API

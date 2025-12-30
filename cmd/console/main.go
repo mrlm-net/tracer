@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
@@ -23,6 +24,9 @@ var injectTraceHeader = flag.Bool("inject-trace-id", false, "If true, add X-Trac
 var methodFlag = flag.String("method", "GET", "HTTP method to use for http tracer")
 var dataFlag = flag.String("data", "", "Request body to send (for POST/PUT/PATCH)")
 var preferIP = flag.String("prefer-ip", "", "IP preference: v4|v6|auto (default: auto)")
+var outputFlagShort = flag.String("o", "json", "output format: json|html")
+var outputFlag = flag.String("output", "json", "output format: json|html")
+var outFileFlag = flag.String("out-file", "./tracer-report.html", "output path when using html")
 
 type headerFlags []string
 
@@ -37,6 +41,11 @@ var headerFlag headerFlags
 
 func main() {
 	flag.Parse()
+	// decide output mode (prefer short flag if provided)
+	outputChoice := *outputFlag
+	if outputChoice == "json" && *outputFlagShort != "json" {
+		outputChoice = *outputFlagShort
+	}
 	flagArgs := flag.Args()
 	if len(flagArgs) == 0 {
 		prog := filepath.Base(os.Args[0])
@@ -76,7 +85,14 @@ func main() {
 			os.Exit(1)
 		}
 
-		emitter := eventpkg.NewStdoutEmitter(os.Stdout, true, true)
+		var be *eventpkg.BufferingEmitter
+		var emitter eventpkg.Emitter
+		if outputChoice == "html" {
+			be = eventpkg.NewBufferingEmitter()
+			emitter = be
+		} else {
+			emitter = eventpkg.NewStdoutEmitter(os.Stdout, true, true)
+		}
 		opts := []udppkg.Option{udppkg.WithEmitter(emitter), udppkg.WithDryRun(*dryRun), udppkg.WithIPPreference(*preferIP)}
 		if *dataFlag != "" {
 			opts = append(opts, udppkg.WithDataString(*dataFlag))
@@ -84,6 +100,37 @@ func main() {
 		if err := udppkg.TraceAddr(context.Background(), addr, opts...); err != nil {
 			fmt.Fprintf(os.Stderr, "udp tracer failed: %v\n", err)
 			os.Exit(1)
+		}
+		if be != nil {
+			events := be.Events()
+			jb, err := json.Marshal(events)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to marshal events: %v\n", err)
+				os.Exit(1)
+			}
+			tplBytes, err := os.ReadFile("./public/report.html")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to read template: %v\n", err)
+				os.Exit(1)
+			}
+			tplStr := string(tplBytes)
+			// prefer replacing <!--DATA--> inside template if present
+			if strings.Contains(tplStr, "<!--DATA-->") {
+				tplStr = strings.Replace(tplStr, "<!--DATA-->", string(jb), 1)
+			} else {
+				script := fmt.Sprintf("<script id=\"__DATA__\" type=\"application/json\">%s</script>", jb)
+				if strings.Contains(tplStr, "</body>") {
+					tplStr = strings.Replace(tplStr, "</body>", script+"</body>", 1)
+				} else {
+					tplStr = tplStr + script
+				}
+			}
+			outPath := *outFileFlag
+			if err := os.WriteFile(outPath, []byte(tplStr), 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to write html: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Fprintln(os.Stdout, "Wrote HTML report to "+outPath)
 		}
 	case "tcp":
 		// ensure target is host:port for TCP
@@ -113,7 +160,14 @@ func main() {
 			os.Exit(1)
 		}
 
-		emitter := eventpkg.NewStdoutEmitter(os.Stdout, true, true)
+		var be *eventpkg.BufferingEmitter
+		var emitter eventpkg.Emitter
+		if outputChoice == "html" {
+			be = eventpkg.NewBufferingEmitter()
+			emitter = be
+		} else {
+			emitter = eventpkg.NewStdoutEmitter(os.Stdout, true, true)
+		}
 		opts := []tcpkg.Option{tcpkg.WithEmitter(emitter), tcpkg.WithDryRun(*dryRun), tcpkg.WithIPPreference(*preferIP)}
 		if *dataFlag != "" {
 			opts = append(opts, tcpkg.WithDataString(*dataFlag))
@@ -122,8 +176,45 @@ func main() {
 			fmt.Fprintf(os.Stderr, "tcp tracer failed: %v\n", err)
 			os.Exit(1)
 		}
+		if be != nil {
+			events := be.Events()
+			jb, err := json.Marshal(events)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to marshal events: %v\n", err)
+				os.Exit(1)
+			}
+			tplBytes, err := os.ReadFile("./public/report.html")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to read template: %v\n", err)
+				os.Exit(1)
+			}
+			tplStr := string(tplBytes)
+			if strings.Contains(tplStr, "<!--DATA-->") {
+				tplStr = strings.Replace(tplStr, "<!--DATA-->", string(jb), 1)
+			} else {
+				script := fmt.Sprintf("<script id=\"__DATA__\" type=\"application/json\">%s</script>", jb)
+				if strings.Contains(tplStr, "</body>") {
+					tplStr = strings.Replace(tplStr, "</body>", script+"</body>", 1)
+				} else {
+					tplStr = tplStr + script
+				}
+			}
+			outPath := *outFileFlag
+			if err := os.WriteFile(outPath, []byte(tplStr), 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to write html: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Fprintln(os.Stdout, "Wrote HTML report to "+outPath)
+		}
 	case "http":
-		emitter := eventpkg.NewStdoutEmitter(os.Stdout, true, true)
+		var be *eventpkg.BufferingEmitter
+		var emitter eventpkg.Emitter
+		if outputChoice == "html" {
+			be = eventpkg.NewBufferingEmitter()
+			emitter = be
+		} else {
+			emitter = eventpkg.NewStdoutEmitter(os.Stdout, true, true)
+		}
 		opts := []httppkg.Option{httppkg.WithEmitter(emitter), httppkg.WithDryRun(*dryRun), httppkg.WithInjectTraceHeader(*injectTraceHeader), httppkg.WithIPPreference(*preferIP)}
 		if *methodFlag != "" && *methodFlag != "GET" {
 			opts = append(opts, httppkg.WithMethod(*methodFlag))
@@ -153,6 +244,36 @@ func main() {
 		if err := httppkg.TraceURL(context.Background(), targetURL, opts...); err != nil {
 			fmt.Fprintf(os.Stderr, "http tracer failed: %v\n", err)
 			os.Exit(1)
+		}
+		if be != nil {
+			events := be.Events()
+			jb, err := json.Marshal(events)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to marshal events: %v\n", err)
+				os.Exit(1)
+			}
+			tplBytes, err := os.ReadFile("./public/report.html")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to read template: %v\n", err)
+				os.Exit(1)
+			}
+			tplStr := string(tplBytes)
+			if strings.Contains(tplStr, "<!--DATA-->") {
+				tplStr = strings.Replace(tplStr, "<!--DATA-->", string(jb), 1)
+			} else {
+				script := fmt.Sprintf("<script id=\"__DATA__\" type=\"application/json\">%s</script>", jb)
+				if strings.Contains(tplStr, "</body>") {
+					tplStr = strings.Replace(tplStr, "</body>", script+"</body>", 1)
+				} else {
+					tplStr = tplStr + script
+				}
+			}
+			outPath := *outFileFlag
+			if err := os.WriteFile(outPath, []byte(tplStr), 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to write html: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Fprintln(os.Stdout, "Wrote HTML report to "+outPath)
 		}
 	default:
 		panic("Unknown tracer type: " + *tracerFlag)
