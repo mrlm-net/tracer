@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"io"
@@ -25,6 +26,12 @@ type traceConfig struct {
 	// InjectTraceHeader controls whether the tracer will add `X-Trace-Id`
 	// to outgoing requests. Default: false.
 	InjectTraceHeader bool
+	// Method if non-empty overrides the HTTP method used (default GET)
+	Method string
+	// Body supplies a request body for non-GET methods; may be nil.
+	Body io.Reader
+	// Headers are additional headers to set on the outgoing request.
+	Headers http.Header
 }
 
 // WithEmitter sets a custom event.Emitter for TraceURL.
@@ -39,7 +46,23 @@ func WithTimeout(d time.Duration) Option { return func(c *traceConfig) { c.Timeo
 // WithInjectTraceHeader controls whether to add X-Trace-Id to requests.
 func WithInjectTraceHeader(v bool) Option { return func(c *traceConfig) { c.InjectTraceHeader = v } }
 
-// TraceURL performs an HTTP GET to targetURL and emits normalized events via the configured Emitter.
+// WithMethod sets the HTTP request method (e.g. POST, PUT, PATCH).
+func WithMethod(m string) Option { return func(c *traceConfig) { c.Method = m } }
+
+// WithBody sets the request body for TraceURL. Caller is responsible for
+// providing an io.Reader that can be read once by the tracer.
+func WithBody(r io.Reader) Option { return func(c *traceConfig) { c.Body = r } }
+
+// WithBodyString is a convenience to set a string body.
+func WithBodyString(s string) Option {
+	return func(c *traceConfig) { c.Body = bytes.NewBufferString(s) }
+}
+
+// WithHeaders sets extra headers on the outgoing request.
+func WithHeaders(h http.Header) Option { return func(c *traceConfig) { c.Headers = h } }
+
+// TraceURL performs an HTTP request to targetURL and emits normalized events via the configured Emitter.
+// By default it performs a GET; use WithMethod/WithBody/WithHeaders to customize.
 func TraceURL(ctx context.Context, targetURL string, opts ...Option) error {
 	cfg := &traceConfig{Timeout: 30 * time.Second, Redact: true}
 	for _, o := range opts {
@@ -61,10 +84,23 @@ func TraceURL(ctx context.Context, targetURL string, opts ...Option) error {
 		return nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	method := http.MethodGet
+	if cfg.Method != "" {
+		method = cfg.Method
+	}
+	req, err := http.NewRequestWithContext(ctx, method, targetURL, cfg.Body)
 	if err != nil {
 		cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "http", EventType: "error", Stage: "request_new", TraceID: traceID, Payload: map[string]interface{}{"error": err.Error()}})
 		return err
+	}
+
+	// attach any provided headers
+	if cfg.Headers != nil {
+		for k, v := range cfg.Headers {
+			for _, vv := range v {
+				req.Header.Add(k, vv)
+			}
+		}
 	}
 
 	start := time.Now()
