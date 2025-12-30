@@ -27,9 +27,8 @@
 						<div class="border-b border-gray-200 pb-5 dark:border-white/10">
 						  <div class="sm:flex sm:items-baseline sm:justify-between">
 						    <div class="sm:w-0 sm:flex-1">
-						      <h1 id="message-heading" class="text-base font-semibold text-gray-900 dark:text-white">Tracer Report</h1>
-						      <p class="mt-1 truncate text-sm text-gray-500 dark:text-gray-400">Network tracer results</p>
-						      <div id="report-meta" class="mt-2 text-sm text-gray-600 dark:text-gray-400"></div>
+							<h1 id="message-heading" class="text-base font-semibold text-gray-900 dark:text-white">Tracer Report</h1>
+							<div id="report-meta" class="mt-2 text-sm text-gray-600 dark:text-gray-400"></div>
 						    </div>
 
                 
@@ -70,16 +69,50 @@
 				function el(tag, cls, html){ const n = document.createElement(tag); if(cls) n.className = cls; if(html!==undefined) n.innerHTML = html; return n }
 
 				function statusBadge(e){
-					// determine status label and classes
+					// determine status label and classes (richer mapping)
 					const et = (e.event_type||'').toLowerCase()
-					// Use provided badge styles for different statuses
-					if(et === 'error') return {txt:'Error', cls:'inline-flex items-center rounded-md bg-red-100 px-2 py-1 text-xs font-medium text-red-700 dark:bg-red-400/10 dark:text-red-400'}
-					if(et === 'metric') return {txt:'Metric', cls:'inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 dark:bg-gray-400/10 dark:text-gray-400'}
-					// consider stage-based complete
-					if(e.stage && /done|complete|response|closed/i.test(e.stage)) return {txt:'Complete', cls:'inline-flex items-center rounded-md bg-green-100 px-2 py-1 text-xs font-medium text-green-700 dark:bg-green-400/10 dark:text-green-400'}
-					// default: in-progress
-					return {txt:'In progress', cls:'inline-flex items-center rounded-md bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-800 dark:bg-yellow-400/10 dark:text-yellow-500'}
+					const stage = (e.stage||'').toLowerCase()
+					const payload = e.payload || {}
+					const errText = (payload.error||'').toString().toLowerCase()
+
+					// helpers for classes
+					const badge = (txt, bg, text) => ({txt, cls: `inline-flex items-center rounded-md ${bg} px-2 py-1 text-xs font-medium ${text}`})
+
+                    
+
+					// explicit types
+					if(et === 'error') {
+						if(errText.indexOf('timeout') !== -1) return badge('Timed out','bg-purple-100','text-purple-700 dark:bg-purple-400/10 dark:text-purple-400')
+						if(errText.indexOf('cancel') !== -1) return badge('Cancelled','bg-gray-200','text-gray-700 dark:bg-gray-500/10 dark:text-gray-200')
+						return badge('Failed','bg-red-100','text-red-700 dark:bg-red-400/10 dark:text-red-400')
+					}
+					if(et === 'metric') return badge('Metric','bg-gray-100','text-gray-600 dark:bg-gray-400/10 dark:text-gray-400')
+
+					// dry-run / skipped
+					if(stage.indexOf('dry_run') !== -1 || stage.indexOf('dry') !== -1) return badge('Skipped','bg-gray-100','text-gray-600 dark:bg-gray-400/10 dark:text-gray-400')
+
+					// terminal stages -> determine success/partial/failed by status or presence of errors
+					if(/done|end|complete|response|closed/.test(stage)){
+						// http status mapping
+						const status = payload.status || payload.code || ''
+						const sNum = parseInt(status,10)
+						if(!isNaN(sNum)){
+							if(sNum >= 200 && sNum < 300) return badge('Succeeded','bg-green-100','text-green-700 dark:bg-green-400/10 dark:text-green-400')
+							if(sNum >= 500) return badge('Failed','bg-red-100','text-red-700 dark:bg-red-400/10 dark:text-red-400')
+							// 3xx/4xx -> partial/warning
+							return badge('Partial','bg-yellow-100','text-yellow-800 dark:bg-yellow-400/10 dark:text-yellow-500')
+						}
+						// non-http terminal stages: assume success unless we saw an error event
+						return badge('Succeeded','bg-green-100','text-green-700 dark:bg-green-400/10 dark:text-green-400')
+					}
+
+					// ongoing/connect/send stages -> in progress
+					if(/start|send|connect|wrote|request/.test(stage)) return badge('In Progress','bg-yellow-100','text-yellow-800 dark:bg-yellow-400/10 dark:text-yellow-500')
+
+					// fallback
+					return badge('In Progress','bg-yellow-100','text-yellow-800 dark:bg-yellow-400/10 dark:text-yellow-500')
 				}
+
 
 				try{
 					const raw = document.getElementById('__DATA__')?.textContent || '[]'
@@ -129,14 +162,38 @@
 													if(target && host && ip && port && proto) break
 												}
 
-												const parts = []
-												if(target) parts.push(`Target: <strong>${target}</strong>`)
-												if(host) parts.push(`Host: <strong>${host}</strong>`)
-												if(ip) parts.push(`IP: <strong>${ip}</strong>`)
-												if(port) parts.push(`Port: <strong>${port}</strong>`)
-												if(proto) parts.push(`Proto: <strong>${proto}</strong>`)
-												if(status) parts.push(`Status: <strong>${status}</strong>`)
-												meta.innerHTML = parts.join(' &nbsp; • &nbsp; ')
+												const traceIds = Array.from(new Set(events.map(x=>x.trace_id).filter(Boolean)))
+
+												const entries = []
+												if(traceIds.length === 1){
+													entries.push({k: 'Trace', v: traceIds[0]})
+												} else if(traceIds.length > 1){
+													entries.push({k: 'Traces', v: String(traceIds.length)})
+												}
+												if(target) entries.push({k: 'Target', v: target})
+												if(host) entries.push({k: 'Host', v: host})
+												if(ip) entries.push({k: 'IP', v: ip})
+												if(port) entries.push({k: 'Port', v: port})
+												if(proto) entries.push({k: 'Proto', v: proto})
+												if(status) entries.push({k: 'Status', v: status})
+
+												// Render as description list matching provided design
+												let metaHtml = ''
+												metaHtml += `<div class="px-4 sm:px-0">` +
+															`<p class="mt-1 max-w-2xl text-sm/6 text-gray-500 dark:text-gray-400">Summary of collected metadata.</p>` +
+															`</div>`
+												metaHtml += `<div class="mt-6 border-t border-gray-100 dark:border-white/10">` +
+															`<dl class="divide-y divide-gray-100 dark:divide-white/10">`
+
+												metaHtml += entries.map(en => {
+													return `<div class="px-4 py-6 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-0">` +
+														   `<dt class="text-sm/6 font-medium text-gray-900 dark:text-gray-100">${en.k}</dt>` +
+														   `<dd class="mt-1 text-sm/6 text-gray-700 sm:col-span-2 sm:mt-0 dark:text-gray-400">${en.v}</dd>` +
+														   `</div>`
+												}).join('')
+
+												metaHtml += `</dl></div>`
+												meta.innerHTML = metaHtml
 
 											})()
 
@@ -175,7 +232,8 @@
 							timeDisplay = isNaN(parsed) ? ts : new Date(parsed).toLocaleString(undefined, {timeZone: 'UTC'})
 						}
 						const timeHtml = `<p class="whitespace-nowrap">${timeDisplay}</p>`
-						metaRow.innerHTML = timeHtml + `<svg viewBox="0 0 2 2" class="size-0.5 fill-current mx-1"><circle r="1" cx="1" cy="1"/></svg>` + `<p class="truncate">${e.trace_id || ''}</p>`
+						const hostOrTarget = (e.payload && (e.payload.host || e.payload.target || e.payload.url)) ? (e.payload.host || e.payload.target || e.payload.url) : ''
+						metaRow.innerHTML = timeHtml + `<svg viewBox="0 0 2 2" class="size-0.5 fill-current mx-1"><circle r="1" cx="1" cy="1"/></svg>` + `<p class="truncate">${hostOrTarget}</p>`
 						left.appendChild(metaRow)
 
 						li.appendChild(left)
@@ -233,10 +291,22 @@
 						}
 						// raw payload / tags
 						if(e.tags && Object.keys(e.tags).length>0){
-								detailsPanel.appendChild(el('div','text-xs text-gray-600 mb-1','Tags'))
-								detailsPanel.appendChild(el('pre','text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-200 p-2',JSON.stringify(e.tags, null, 2)))
-							}
-							detailsPanel.appendChild(el('pre','text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-200 p-2 mt-2',JSON.stringify(e, null, 2)))
+							detailsPanel.appendChild(el('div','text-xs text-gray-600 mb-1','Tags'))
+							const preTags = document.createElement('pre')
+							preTags.className = 'text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-200 p-2'
+							const codeTags = document.createElement('code')
+							codeTags.className = 'language-json'
+							codeTags.textContent = JSON.stringify(e.tags, null, 2)
+							preTags.appendChild(codeTags)
+							detailsPanel.appendChild(preTags)
+						}
+						const preAll = document.createElement('pre')
+						preAll.className = 'text-xs bg-gray-100 dark:bg-gray-800 dark:text-gray-200 p-2 mt-2'
+						const codeAll = document.createElement('code')
+						codeAll.className = 'language-json'
+						codeAll.textContent = JSON.stringify(e, null, 2)
+						preAll.appendChild(codeAll)
+						detailsPanel.appendChild(preAll)
 
 						// wire toggle: three-dot button opens/closes the details panel
 						btn.addEventListener('click', (ev)=>{
@@ -247,6 +317,14 @@
 								if(open){
 									btn.classList.remove('text-gray-500','dark:text-gray-300')
 									btn.classList.add('text-gray-900','dark:text-white')
+
+									// newly visible: run highlight on any <pre><code> children
+									if(typeof hljs !== 'undefined'){
+										const codes = detailsPanel.querySelectorAll('pre code')
+										codes.forEach(c => {
+											try{ hljs.highlightElement(c) }catch(e){/* ignore */}
+										})
+									}
 								} else {
 									btn.classList.remove('text-gray-900','dark:text-white')
 									btn.classList.add('text-gray-500','dark:text-gray-300')
@@ -267,5 +345,21 @@
                 }
 			})()
 		</script>
+	<!-- Highlight.js: GitHub Dark style and runtime (loaded via CDN) -->
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css">
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+	<script>
+		(function(){
+			if(typeof hljs === 'undefined') return;
+			function runHljs(){
+				try{ hljs.highlightAll(); }catch(e){/* ignore */}
+			}
+			if(document.readyState === 'loading'){
+				document.addEventListener('DOMContentLoaded', runHljs);
+			} else {
+				runHljs();
+			}
+		})();
+	</script>
 	</body>
 </html>
