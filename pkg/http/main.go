@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mrlm-net/http-tracer/pkg/event"
+	"github.com/mrlm-net/tracer/pkg/event"
 )
 
 type Option func(*traceConfig)

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	eventpkg "github.com/mrlm-net/http-tracer/pkg/event"
-	httppkg "github.com/mrlm-net/http-tracer/pkg/http"
+	eventpkg "github.com/mrlm-net/tracer/pkg/event"
+	httppkg "github.com/mrlm-net/tracer/pkg/http"
 )
 
 var tracerFlag = flag.String("tracer", "http", "Type of tracer to use: udp, tcp, http, noop")
