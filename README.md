@@ -74,6 +74,8 @@ Important flags (see `cmd/console/main.go`):
 - `-data` : Request payload to send for TCP/UDP or HTTP body
 - `-H` : Repeatable header flags for HTTP (format `Name: value`)
 
+- `-prefer-ip` : IP preference when resolving hostnames. Accepts `v4`, `v6`, or `auto` (default). When an IP literal is provided (e.g. `127.0.0.1` or `[::1]`) the tracer will honor the literal family.
+
 Example:
 
 ```bash
@@ -101,6 +103,35 @@ em := event.NewStdoutEmitter(os.Stdout, true, true)
 http.TraceURL(ctx, "https://example.com/", http.WithEmitter(em), http.WithDryRun(false))
 // TCP
 tcp.TraceAddr(ctx, "example.com:443", tcp.WithEmitter(em), tcp.WithDataString("hello"))
+
+IPv4 / IPv6 examples (CLI):
+
+```bash
+# IPv4 literal
+go run ./cmd/console -tracer tcp 127.0.0.1:8080
+
+# IPv6 literal (note brackets when specifying a port)
+go run ./cmd/console -tracer tcp [::1]:8080
+
+# Link-local IPv6 with zone (example):
+go run ./cmd/console -tracer udp "fe80::1%en0:9999"
+
+# Prefer IPv6 when resolving a hostname
+go run ./cmd/console -tracer http -prefer-ip v6 https://example.com/
+```
+
+Target-argument examples (copy & run):
+
+```bash
+# HTTP (URL target)
+go run ./cmd/console -tracer http https://example.com/
+
+# TCP (host:port target)
+go run ./cmd/console -tracer tcp example.com:443
+
+# UDP (host:port target)
+go run ./cmd/console -tracer udp 127.0.0.1:9999
+```
 ```
 
 ## Debugging

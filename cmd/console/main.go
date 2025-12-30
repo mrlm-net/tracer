@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	eventpkg "github.com/mrlm-net/tracer/pkg/event"
@@ -21,6 +22,8 @@ var dryRun = flag.Bool("dry-run", false, "If true, don't perform network request
 var injectTraceHeader = flag.Bool("inject-trace-id", false, "If true, add X-Trace-Id header to outgoing requests")
 var methodFlag = flag.String("method", "GET", "HTTP method to use for http tracer")
 var dataFlag = flag.String("data", "", "Request body to send (for POST/PUT/PATCH)")
+var preferIP = flag.String("prefer-ip", "", "IP preference: v4|v6|auto (default: auto)")
+
 type headerFlags []string
 
 func (h *headerFlags) String() string { return strings.Join(*h, ", ") }
@@ -34,11 +37,15 @@ var headerFlag headerFlags
 
 func main() {
 	flag.Parse()
-	// Default target URL; can be overridden by first non-flag argument
-	targetURL := "https://example.com/"
-	if args := flag.Args(); len(args) > 0 {
-		targetURL = args[0]
+	flagArgs := flag.Args()
+	if len(flagArgs) == 0 {
+		prog := filepath.Base(os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [flags] target\n\n", prog)
+		flag.PrintDefaults()
+		os.Exit(2)
 	}
+	// first non-flag argument is the target (host:port or URL)
+	targetURL := flagArgs[0]
 
 	switch *tracerFlag {
 	case "udp":
@@ -70,7 +77,7 @@ func main() {
 		}
 
 		emitter := eventpkg.NewStdoutEmitter(os.Stdout, true, true)
-		opts := []udppkg.Option{udppkg.WithEmitter(emitter), udppkg.WithDryRun(*dryRun)}
+		opts := []udppkg.Option{udppkg.WithEmitter(emitter), udppkg.WithDryRun(*dryRun), udppkg.WithIPPreference(*preferIP)}
 		if *dataFlag != "" {
 			opts = append(opts, udppkg.WithDataString(*dataFlag))
 		}
@@ -107,7 +114,7 @@ func main() {
 		}
 
 		emitter := eventpkg.NewStdoutEmitter(os.Stdout, true, true)
-		opts := []tcpkg.Option{tcpkg.WithEmitter(emitter), tcpkg.WithDryRun(*dryRun)}
+		opts := []tcpkg.Option{tcpkg.WithEmitter(emitter), tcpkg.WithDryRun(*dryRun), tcpkg.WithIPPreference(*preferIP)}
 		if *dataFlag != "" {
 			opts = append(opts, tcpkg.WithDataString(*dataFlag))
 		}
@@ -117,7 +124,7 @@ func main() {
 		}
 	case "http":
 		emitter := eventpkg.NewStdoutEmitter(os.Stdout, true, true)
-		opts := []httppkg.Option{httppkg.WithEmitter(emitter), httppkg.WithDryRun(*dryRun), httppkg.WithInjectTraceHeader(*injectTraceHeader)}
+		opts := []httppkg.Option{httppkg.WithEmitter(emitter), httppkg.WithDryRun(*dryRun), httppkg.WithInjectTraceHeader(*injectTraceHeader), httppkg.WithIPPreference(*preferIP)}
 		if *methodFlag != "" && *methodFlag != "GET" {
 			opts = append(opts, httppkg.WithMethod(*methodFlag))
 		}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mrlm-net/tracer/pkg/event"
+	"github.com/mrlm-net/tracer/pkg/netutil"
 )
 
 type Option func(*traceConfig)
@@ -20,6 +21,7 @@ type traceConfig struct {
 	Timeout    time.Duration
 	Data       io.Reader
 	RecvBuffer int
+	IPPref     string
 }
 
 // WithEmitter sets a custom emitter.
@@ -40,6 +42,9 @@ func WithDataString(s string) Option { return func(c *traceConfig) { c.Data = st
 // WithRecvBuffer sets a custom buffer size for reads.
 func WithRecvBuffer(n int) Option { return func(c *traceConfig) { c.RecvBuffer = n } }
 
+// WithIPPreference sets IP family preference: "v4", "v6" or ""/"auto".
+func WithIPPreference(p string) Option { return func(c *traceConfig) { c.IPPref = p } }
+
 // TraceAddr sends a UDP packet to addr (host:port) and optionally waits for a response.
 func TraceAddr(ctx context.Context, addr string, opts ...Option) error {
 	cfg := &traceConfig{Timeout: 5 * time.Second, RecvBuffer: 4096}
@@ -59,29 +64,60 @@ func TraceAddr(ctx context.Context, addr string, opts ...Option) error {
 		return nil
 	}
 
-	// Resolve address and dial UDP
-	udpAddr, err := net.ResolveUDPAddr("udp", addr)
-	if err != nil {
-		cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "udp", EventType: "error", Stage: "resolve_error", TraceID: traceID, Payload: map[string]interface{}{"error": err.Error()}})
-		return err
+	// Parse and dial with IP-family awareness
+	host, port, joinAddr, ip, isIP, _, perr := netutil.ParseAddr(addr, "80")
+	if perr != nil {
+		cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "udp", EventType: "error", Stage: "resolve_error", TraceID: traceID, Payload: map[string]interface{}{"error": perr.Error()}})
+		return perr
 	}
 
-	conn, err := net.DialUDP("udp", nil, udpAddr)
-	if err != nil {
-		cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "udp", EventType: "error", Stage: "dial_error", TraceID: traceID, Payload: map[string]interface{}{"error": err.Error()}})
-		return err
+	var conn net.Conn
+	var chosenIP net.IP
+	var resolved []net.IP
+	var fam string
+	var derr error
+
+	if isIP {
+		if netutil.IsIPv4(ip) {
+			conn, derr = (&net.Dialer{Timeout: cfg.Timeout}).DialContext(ctx, "udp4", joinAddr)
+			fam = "v4"
+		} else {
+			conn, derr = (&net.Dialer{Timeout: cfg.Timeout}).DialContext(ctx, "udp6", joinAddr)
+			fam = "v6"
+		}
+		chosenIP = ip
+	} else {
+		conn, chosenIP, resolved, fam, derr = netutil.ResolveAndDial(ctx, "udp", host, port, cfg.IPPref, cfg.Timeout)
+	}
+
+	if derr != nil {
+		cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "udp", EventType: "error", Stage: "dial_error", TraceID: traceID, Payload: map[string]interface{}{"error": derr.Error()}})
+		return derr
 	}
 	defer conn.Close()
 
 	connID := uuid.NewString()
-	cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "udp", EventType: "lifecycle", Stage: "connected", TraceID: traceID, ConnID: connID, Payload: map[string]interface{}{"remote": conn.RemoteAddr().String()}})
+	tags := map[string]string{}
+	if fam != "" {
+		tags["ip_family"] = fam
+	}
+	if chosenIP != nil {
+		tags["remote_ip"] = chosenIP.String()
+	}
+	if len(resolved) > 0 {
+		var sb strings.Builder
+		for i, rip := range resolved {
+			if i > 0 {
+				sb.WriteByte(',')
+			}
+			sb.WriteString(rip.String())
+		}
+		tags["resolved_ips"] = sb.String()
+	}
+	cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "udp", EventType: "lifecycle", Stage: "connected", TraceID: traceID, ConnID: connID, Tags: tags, Payload: map[string]interface{}{"remote": conn.RemoteAddr().String()}})
 
 	// send data
 	if cfg.Data != nil {
-		buf := make([]byte, 0)
-		n, _ := cfg.Data.Read(buf)
-		// reading into zero-length will be zero; instead copy by io.Copy to a buffer
-		// fallback: if Data is strings.Reader, we can re-read via io.ReadAll
 		payload, _ := io.ReadAll(cfg.Data)
 		nn, _ := conn.Write(payload)
 		cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "udp", EventType: "lifecycle", Stage: "data_send", TraceID: traceID, ConnID: connID, Payload: map[string]interface{}{"bytes_sent": nn}})
@@ -97,7 +133,7 @@ func TraceAddr(ctx context.Context, addr string, opts ...Option) error {
 			// timeout or other error — emit as lifecycle with error payload
 			cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "udp", EventType: "lifecycle", Stage: "recv_error", TraceID: traceID, ConnID: connID, Payload: map[string]interface{}{"error": rerr.Error()}})
 		}
-		_ = n
+
 	}
 
 	cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "udp", EventType: "lifecycle", Stage: "request_end", TraceID: traceID, ConnID: connID})

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptrace"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mrlm-net/tracer/pkg/event"
+	"github.com/mrlm-net/tracer/pkg/netutil"
 )
 
 type Option func(*traceConfig)
@@ -32,6 +34,7 @@ type traceConfig struct {
 	Body io.Reader
 	// Headers are additional headers to set on the outgoing request.
 	Headers http.Header
+	IPPref  string
 }
 
 // WithEmitter sets a custom event.Emitter for TraceURL.
@@ -60,6 +63,9 @@ func WithBodyString(s string) Option {
 
 // WithHeaders sets extra headers on the outgoing request.
 func WithHeaders(h http.Header) Option { return func(c *traceConfig) { c.Headers = h } }
+
+// WithIPPreference sets IP family preference for the HTTP transport: "v4", "v6" or ""/"auto".
+func WithIPPreference(p string) Option { return func(c *traceConfig) { c.IPPref = p } }
 
 // TraceURL performs an HTTP request to targetURL and emits normalized events via the configured Emitter.
 // By default it performs a GET; use WithMethod/WithBody/WithHeaders to customize.
@@ -176,8 +182,39 @@ func TraceURL(ctx context.Context, targetURL string, opts ...Option) error {
 
 	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 
+	// Create a custom DialContext which respects IP literals and performs
+	// family-aware resolution/dialing when a hostname is provided.
+	defaultPort := "80"
+	if req.URL.Scheme == "https" {
+		defaultPort = "443"
+	}
+
+	dialCtx := func(ctx context.Context, network, address string) (net.Conn, error) {
+		// address is host:port
+		host, port, join, ip, isIP, _, _ := netutil.ParseAddr(address, defaultPort)
+		if isIP {
+			if netutil.IsIPv4(ip) {
+				return (&net.Dialer{Timeout: cfg.Timeout}).DialContext(ctx, "tcp4", join)
+			}
+			return (&net.Dialer{Timeout: cfg.Timeout}).DialContext(ctx, "tcp6", join)
+		}
+		// hostname: attempt ResolveAndDial honoring preference
+		conn, _, _, _, err := netutil.ResolveAndDial(ctx, "tcp", host, port, cfg.IPPref, cfg.Timeout)
+		return conn, err
+	}
+
+	// clone default transport when possible and inject DialContext
+	var baseTransport http.RoundTripper = http.DefaultTransport
+	if bt, ok := http.DefaultTransport.(*http.Transport); ok {
+		tr := bt.Clone()
+		tr.DialContext = dialCtx
+		// keep TLS handshake timeout in sync with overall timeout
+		tr.TLSHandshakeTimeout = cfg.Timeout
+		baseTransport = tr
+	}
+
 	// Wrap the transport to capture per-hop request/response headers
-	transport := &tracingTransport{base: http.DefaultTransport, emitter: cfg.Emitter, traceID: traceID, redact: cfg.Redact, injectTraceHeader: cfg.InjectTraceHeader}
+	transport := &tracingTransport{base: baseTransport, emitter: cfg.Emitter, traceID: traceID, redact: cfg.Redact, injectTraceHeader: cfg.InjectTraceHeader}
 
 	client := &http.Client{Timeout: cfg.Timeout, Transport: transport}
 
