@@ -27,6 +27,14 @@ This project uses Go modules. Add it to your module or install the CLI with:
 go get github.com/mrlm-net/tracer
 ```
 
+Remote install (recommended for CLI users):
+
+```bash
+go install github.com/mrlm-net/tracer/cmd/console@latest
+```
+
+The installed binary will be placed in `$(go env GOBIN)` or `$(go env GOPATH)/bin` — add that to your `PATH` if needed.
+
 ## Requirements
 
 - Go 1.21 or higher
@@ -111,6 +119,8 @@ Contributions welcome. Please follow the repository contribution guidelines in t
 ## License
 
 Apache-2.0
+
+---
 
 All rights reserved © Martin Hrášek
 [@mrlm-xyz](https://github.com/mrlm-xyz)
