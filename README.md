@@ -132,7 +132,6 @@ go run ./cmd/console -tracer tcp example.com:443
 # UDP (host:port target)
 go run ./cmd/console -tracer udp 127.0.0.1:9999
 ```
-```
 
 ## Debugging
 
