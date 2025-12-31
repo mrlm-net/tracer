@@ -1,22 +1,8 @@
-#FROM golang:tip-alpine3.22 AS backend
+FROM golang:1.21-alpine AS build
+WORKDIR /src
+COPY . .
+RUN CGO_ENABLED=0 go build -o /bin/tracer ./cmd/console
 
-#WORKDIR /app
-
-#COPY . .
-
-#RUN go mod download
-#RUN go mod tidy
-#RUN go build -o bin/appsrv ./main.go
-
-FROM golang:tip-alpine3.22 AS runtime
-
-ENV GIN_MODE=release
-
-WORKDIR /app
-
-COPY --from=backend /app/bin/appsrv ./appsrv
-COPY --from=backend /app/templates ./templates
-
-CMD ["./appsrv"]
-
-EXPOSE 8765
+FROM scratch
+COPY --from=build /bin/tracer /tracer
+ENTRYPOINT ["/tracer"]
