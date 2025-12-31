@@ -29,6 +29,10 @@ type consoleConfig struct {
 	OutFile           string
 	HeaderFlags       headerFlags
 	Target            string
+	// Redaction controls
+	Redact          bool
+	RedactRequests  bool
+	RedactResponses bool
 }
 
 // parseFlags parses CLI args and returns a consoleConfig or error.
@@ -45,6 +49,11 @@ func parseFlags(args []string, stdout, stderr *os.File) (consoleConfig, error) {
 	outputFlagShort := fs.String("o", "json", "output format: json|html")
 	outputFlag := fs.String("output", "json", "output format: json|html")
 	outFileFlag := fs.String("out-file", "./tracer-report.html", "output path when using html")
+
+	// redaction flags (default: enabled)
+	redactFlag := fs.Bool("redact", true, "If true, redact sensitive headers in emitted events (Authorization, Cookie, Set-Cookie)")
+	redactReqFlag := fs.Bool("redact-requests", true, "Redact request headers (Authorization, Cookie)")
+	redactRespFlag := fs.Bool("redact-responses", true, "Redact response headers (Set-Cookie)")
 
 	var header headerFlags
 	fs.Var(&header, "H", "HTTP header (Name: value)")
@@ -78,6 +87,9 @@ func parseFlags(args []string, stdout, stderr *os.File) (consoleConfig, error) {
 		OutFile:           *outFileFlag,
 		HeaderFlags:       header,
 		Target:            flagArgs[0],
+		Redact:            *redactFlag,
+		RedactRequests:    *redactReqFlag,
+		RedactResponses:   *redactRespFlag,
 	}
 	return cfg, nil
 }

@@ -24,7 +24,13 @@ type traceConfig struct {
 	Emitter event.Emitter
 	Dry     bool
 	Timeout time.Duration
-	Redact  bool
+	// Redact controls coarse-grained redaction (keeps old behavior).
+	// New fine-grained controls are provided by RedactRequests/RedactResponses.
+	Redact bool
+	// RedactRequests controls whether request headers like Authorization/Cookie are redacted.
+	RedactRequests bool
+	// RedactResponses controls whether response headers like Set-Cookie are redacted.
+	RedactResponses bool
 	// InjectTraceHeader controls whether the tracer will add `X-Trace-Id`
 	// to outgoing requests. Default: false.
 	InjectTraceHeader bool
@@ -67,10 +73,24 @@ func WithHeaders(h http.Header) Option { return func(c *traceConfig) { c.Headers
 // WithIPPreference sets IP family preference for the HTTP transport: "v4", "v6" or ""/"auto".
 func WithIPPreference(p string) Option { return func(c *traceConfig) { c.IPPref = p } }
 
+// WithRedact sets coarse-grained redaction. It sets both request and response
+// redaction flags so it provides a single toggle for legacy callers.
+func WithRedact(v bool) Option {
+	return func(c *traceConfig) { c.Redact = v; c.RedactRequests = v; c.RedactResponses = v }
+}
+
+// WithRedactRequests controls redaction of request headers (Authorization, Cookie).
+func WithRedactRequests(v bool) Option { return func(c *traceConfig) { c.RedactRequests = v } }
+
+// WithRedactResponses controls redaction of response headers (Set-Cookie).
+func WithRedactResponses(v bool) Option { return func(c *traceConfig) { c.RedactResponses = v } }
+
 // TraceURL performs an HTTP request to targetURL and emits normalized events via the configured Emitter.
 // By default it performs a GET; use WithMethod/WithBody/WithHeaders to customize.
 func TraceURL(ctx context.Context, targetURL string, opts ...Option) error {
 	cfg := &traceConfig{Timeout: 30 * time.Second, Redact: true}
+	cfg.RedactRequests = true
+	cfg.RedactResponses = true
 	for _, o := range opts {
 		o(cfg)
 	}
@@ -214,7 +234,7 @@ func TraceURL(ctx context.Context, targetURL string, opts ...Option) error {
 	}
 
 	// Wrap the transport to capture per-hop request/response headers
-	transport := &tracingTransport{base: baseTransport, emitter: cfg.Emitter, traceID: traceID, redact: cfg.Redact, injectTraceHeader: cfg.InjectTraceHeader}
+	transport := &tracingTransport{base: baseTransport, emitter: cfg.Emitter, traceID: traceID, redactRequests: cfg.RedactRequests, redactResponses: cfg.RedactResponses, injectTraceHeader: cfg.InjectTraceHeader}
 
 	client := &http.Client{Timeout: cfg.Timeout, Transport: transport}
 
@@ -277,7 +297,8 @@ type tracingTransport struct {
 	base              http.RoundTripper
 	emitter           event.Emitter
 	traceID           string
-	redact            bool
+	redactRequests    bool
+	redactResponses   bool
 	injectTraceHeader bool
 }
 
@@ -294,7 +315,7 @@ func (t *tracingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 
 	// emit request_send with headers (sanitized)
 	reqHdrs := copyHeaders(r.Header)
-	if t.redact {
+	if t.redactRequests {
 		sanitizeHeaders(reqHdrs, true)
 	}
 	t.emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "http", EventType: "lifecycle", Stage: "request_send", TraceID: t.traceID, Payload: map[string]interface{}{"method": r.Method, "url": r.URL.String(), "headers": reqHdrs}})
@@ -307,7 +328,7 @@ func (t *tracingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 
 	// emit response_headers for this hop
 	respHdrs := copyHeaders(resp.Header)
-	if t.redact {
+	if t.redactResponses {
 		sanitizeHeaders(respHdrs, false)
 	}
 	t.emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "http", EventType: "lifecycle", Stage: "response_headers", TraceID: t.traceID, Payload: map[string]interface{}{"status": resp.Status, "headers": respHdrs}})

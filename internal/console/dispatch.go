@@ -82,6 +82,10 @@ func dispatchTrace(ctx context.Context, cfg consoleConfig, stdout, stderr *os.Fi
 			}
 			opts = append(opts, httppkg.WithHeaders(h))
 		}
+		// Wire redaction options from CLI to the http tracer. Apply coarse-grained
+		// option first then fine-grained options so specific flags override.
+		opts = append(opts, httppkg.WithRedact(cfg.Redact), httppkg.WithRedactRequests(cfg.RedactRequests), httppkg.WithRedactResponses(cfg.RedactResponses))
+
 		if err := httppkg.TraceURL(ctx, cfg.Target, opts...); err != nil {
 			fmt.Fprintf(stderr, "http tracer failed: %v\n", err)
 			return 1
