@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/mrlm-net/tracer/pkg/event"
 	"github.com/mrlm-net/tracer/pkg/netutil"
+	"github.com/mrlm-net/tracer/pkg/tracecommon"
 )
 
 type Option func(*traceConfig)
@@ -56,11 +57,9 @@ func TraceAddr(ctx context.Context, addr string, opts ...Option) error {
 		cfg.Emitter = event.NewStdoutEmitter(os.Stdout, true, true)
 	}
 
-	traceID := uuid.NewString()
-	cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "udp", EventType: "lifecycle", Stage: "request_start", TraceID: traceID, Payload: map[string]interface{}{"addr": addr}})
-
+	traceID := tracecommon.StartRequest(ctx, cfg.Emitter, "udp", addr)
 	if cfg.Dry {
-		cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "udp", EventType: "lifecycle", Stage: "dry_run", TraceID: traceID})
+		tracecommon.EmitDryRun(ctx, cfg.Emitter, "udp", traceID)
 		return nil
 	}
 
@@ -91,47 +90,31 @@ func TraceAddr(ctx context.Context, addr string, opts ...Option) error {
 	}
 
 	if derr != nil {
-		cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "udp", EventType: "error", Stage: "dial_error", TraceID: traceID, Payload: map[string]interface{}{"error": derr.Error()}})
+		tracecommon.EmitError(ctx, cfg.Emitter, "udp", "dial_error", traceID, derr)
 		return derr
 	}
 	defer conn.Close()
 
 	connID := uuid.NewString()
-	tags := map[string]string{}
-	if fam != "" {
-		tags["ip_family"] = fam
-	}
-	if chosenIP != nil {
-		tags["remote_ip"] = chosenIP.String()
-	}
-	if len(resolved) > 0 {
-		var sb strings.Builder
-		for i, rip := range resolved {
-			if i > 0 {
-				sb.WriteByte(',')
-			}
-			sb.WriteString(rip.String())
-		}
-		tags["resolved_ips"] = sb.String()
-	}
-	cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "udp", EventType: "lifecycle", Stage: "connected", TraceID: traceID, ConnID: connID, Tags: tags, Payload: map[string]interface{}{"remote": conn.RemoteAddr().String()}})
+	tags := tracecommon.BuildTags(chosenIP, resolved, fam)
+	tracecommon.EmitLifecycle(ctx, cfg.Emitter, "udp", "connected", traceID, connID, 0, tags, map[string]interface{}{"remote": conn.RemoteAddr().String()})
 
 	// send data
 	if cfg.Data != nil {
 		payload, _ := io.ReadAll(cfg.Data)
 		nn, _ := conn.Write(payload)
-		cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "udp", EventType: "lifecycle", Stage: "data_send", TraceID: traceID, ConnID: connID, Payload: map[string]interface{}{"bytes_sent": nn}})
+		tracecommon.EmitLifecycle(ctx, cfg.Emitter, "udp", "data_send", traceID, connID, 0, nil, map[string]interface{}{"bytes_sent": nn})
 
 		// wait for response with deadline
 		_ = conn.SetReadDeadline(time.Now().Add(cfg.Timeout))
 		rbuf := make([]byte, cfg.RecvBuffer)
 		rn, rerr := conn.Read(rbuf)
 		if rn > 0 {
-			cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "udp", EventType: "lifecycle", Stage: "data_recv", TraceID: traceID, ConnID: connID, Payload: map[string]interface{}{"bytes_recv": rn}})
+			tracecommon.EmitLifecycle(ctx, cfg.Emitter, "udp", "data_recv", traceID, connID, 0, nil, map[string]interface{}{"bytes_recv": rn})
 		}
 		if rerr != nil {
 			// timeout or other error — emit as lifecycle with error payload
-			cfg.Emitter.Emit(ctx, event.Event{Timestamp: time.Now().UTC(), Protocol: "udp", EventType: "lifecycle", Stage: "recv_error", TraceID: traceID, ConnID: connID, Payload: map[string]interface{}{"error": rerr.Error()}})
+			tracecommon.EmitLifecycle(ctx, cfg.Emitter, "udp", "recv_error", traceID, connID, 0, nil, map[string]interface{}{"error": rerr.Error()})
 		}
 
 	}
