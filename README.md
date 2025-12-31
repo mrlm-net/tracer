@@ -91,6 +91,52 @@ Example: generate HTML report
 go run ./cmd/console -o html --out-file ./report.html -tracer http https://example.com/
 ```
 
+## Quick Start
+
+Get a runnable binary and run a simple HTTP trace (redaction enabled by default):
+
+```bash
+go install github.com/mrlm-net/tracer/cmd/console@latest
+tracer -tracer http https://example.com/
+```
+
+The CLI streams NDJSON events to stdout by default and redacts sensitive headers (Authorization, Cookie, Set-Cookie) unless you explicitly disable redaction.
+
+## Redaction & Security
+
+By default the tracer redacts sensitive header values from emitted events to avoid leaking secrets. The default behavior removes values for `Authorization`, `Cookie` (requests) and `Set-Cookie` (responses). You can control this behavior with the CLI flags `--redact`, `--redact-requests`, and `--redact-responses` (see docs/REDACTION.md for details and security guidance).
+
+Important: disabling redaction (`--redact=false`) may expose secrets. Only disable it for local debugging or when you have explicit approval to capture sensitive data.
+
+## Emitters & Output Formats
+
+The tracer supports multiple emitter behaviors:
+
+- `StdoutEmitter` (default): streams NDJSON events to stdout and prints a short human summary line for each event.
+- `BufferingEmitter`: collects events in memory and writes a single HTML report when the trace completes (use `-o html` and `--out-file`).
+
+See docs/EMITTERS_AND_OUTPUTS.md for the event schema and details about emitters and memory considerations.
+
+## Running in Containers
+
+You can run the tracer inside a container for portable debugging. Build an image containing the `tracer` binary and run it with appropriate mounts to capture reports:
+
+```bash
+# build and run (example)
+docker build -t mrlm/tracer:latest .
+docker run --rm -v $(pwd):/out mrlm/tracer:latest /tracer -tracer http -o html --out-file /out/report.html https://example.com/
+```
+
+When running in multi-tenant environments (Kubernetes/AKS), follow the guidance in docs/CONTAINERS_AND_AKS.md to avoid accidental data leakage and to handle RBAC and network policies correctly.
+
+## AKS / Platform Debugging
+
+Platform engineers can use the tracer as an ephemeral debugging tool in AKS clusters. Recommended approaches include running the tracer as a short-lived Job or `kubectl run` pod and collecting the HTML report via a PVC or `kubectl cp`. Always follow organizational security policies when collecting traces from customer workloads — prefer redaction and secure sinks. See docs/CONTAINERS_AND_AKS.md for example manifests and runbooks.
+
+## Configuration
+
+Currently the tracer is configured via CLI flags. See docs/CONFIGURATION.md for recommendations on env var mappings and wrapper scripts for CI or platform automation.
+
 ## Packages / API
 
 - `pkg/event` — normalized `Event` type and `Emitter` interface; `NewStdoutEmitter` prints NDJSON + pretty summary.
