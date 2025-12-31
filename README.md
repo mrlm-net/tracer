@@ -127,11 +127,11 @@ docker build -t mrlm/tracer:latest .
 docker run --rm -v $(pwd):/out mrlm/tracer:latest /tracer -tracer http -o html --out-file /out/report.html https://example.com/
 ```
 
-When running in multi-tenant environments (Kubernetes/AKS), follow the guidance in docs/CONTAINERS_AND_AKS.md to avoid accidental data leakage and to handle RBAC and network policies correctly.
+When running in multi-tenant environments (Kubernetes/K8s), follow the guidance in docs/CONTAINERS_AND_K8S.md to avoid accidental data leakage and to handle RBAC and network policies correctly.
 
-## AKS / Platform Debugging
+## K8s / Platform Debugging
 
-Platform engineers can use the tracer as an ephemeral debugging tool in AKS clusters. Recommended approaches include running the tracer as a short-lived Job or `kubectl run` pod and collecting the HTML report via a PVC or `kubectl cp`. Always follow organizational security policies when collecting traces from customer workloads — prefer redaction and secure sinks. See docs/CONTAINERS_AND_AKS.md for example manifests and runbooks.
+Platform engineers can use the tracer as an ephemeral debugging tool in K8s clusters. Recommended approaches include running the tracer as a short-lived Job or `kubectl run` pod and collecting the HTML report via a PVC or `kubectl cp`. Always follow organizational security policies when collecting traces from customer workloads — prefer redaction and secure sinks. See docs/CONTAINERS_AND_K8S.md for example manifests and runbooks.
 
 ## Configuration
 

@@ -1,3 +1,4 @@
+````markdown
 # Containers & K8s (Platform Debugging)
 
 Guidance for running the tracer in containers and Kubernetes (K8s) for platform engineers.
@@ -50,3 +51,5 @@ Collect output via `kubectl logs` or mount a PVC and write `--out-file` to the v
 - Confirm who is authorized to run debugging jobs.
 - Prefer `--redact` defaults; only disable redaction with explicit approval.
 - Use ephemeral storage and remove artifacts after debugging.
+
+````
